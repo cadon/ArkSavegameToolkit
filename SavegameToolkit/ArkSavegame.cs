@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -45,6 +46,8 @@ namespace SavegameToolkit
         public override List<GameObject> Objects { get; } = new List<GameObject>();
 
         private int hibernationOffset;
+
+        private int storedOffset;
 
         private int nameTableOffset;
 
@@ -101,8 +104,14 @@ namespace SavegameToolkit
                 readBinaryHibernation(archive, options);
             }
 
-            extractBinaryObjectCryopods(options);
-
+            if (SaveVersion > 10)
+            {
+                readBinaryStoredObjects(archive, options);
+            }
+            else
+            {
+                extractBinaryObjectCryopods(options);
+            }
 
             OldNameList = archive.HasUnknownNames ? archive.NameTable : null;
             HasUnknownData = archive.HasUnknownData;
@@ -112,13 +121,38 @@ namespace SavegameToolkit
         {
             SaveVersion = archive.ReadShort();
 
-            if (SaveVersion < 5 || SaveVersion > 9)
+            if (SaveVersion < 5 || SaveVersion > 11)
             {
                 throw new NotSupportedException("Found unknown Version " + SaveVersion);
             }
 
             if (SaveVersion > 6)
             {
+
+                if (SaveVersion > 10)
+                {
+                    storedOffset = archive.ReadInt();
+                    var v11Unknown1 = archive.ReadInt(); //0
+                    var v11Unknown2 = archive.ReadInt(); //length of storage? on my data with no additional hibernation it seems to match size of file when added to the storedOffset.
+                    var v11Unknown3 = archive.ReadInt(); //0
+                    var v11Unknown4 = archive.ReadInt(); //file size or some other pointer
+                    var v11Unknown5 = archive.ReadInt(); //0
+                    var v11Unknown6 = archive.ReadInt(); //0
+                    var v11Unknown7 = archive.ReadInt(); //0
+                    var v11Unknown8 = archive.ReadInt(); //file size or some other pointer
+                    var v11Unknown9 = archive.ReadInt(); //0
+                    var v11Unknown10 = archive.ReadInt(); //0
+                    var v11Unknown11 = archive.ReadInt(); //0
+                    var v11Unknown12 = archive.ReadInt(); //file size or some other pointer
+                    var v11Unknown13 = archive.ReadInt(); //0
+                    var v11Unknown14 = archive.ReadInt(); //0
+                    var v11Unknown15 = archive.ReadInt(); //0
+                }
+                else
+                {
+                    storedOffset = 0;
+                }
+
                 hibernationOffset = archive.ReadInt();
                 int shouldBeZero = archive.ReadInt();
                 if (shouldBeZero != 0)
@@ -398,6 +432,213 @@ namespace SavegameToolkit
                 HibernationEntries.Add(new HibernationEntry(archive, options));
             }
         }
+
+        private void readBinaryStoredObjects(ArkArchive archive, ReadingOptions options)
+        {
+            if (!options.CryopodCreatures) return;
+
+            var inventoryContainers = Objects.Where(x => x.GetPropertyValue<ObjectReference>("MyInventoryComponent") != null).ToList();
+
+
+            var validStored = Objects
+                .Where(o =>
+                        (o.ClassName.Name.Contains("Cryopod") || o.ClassString.Contains("SoulTrap_") || o.ClassString.Contains("Vivarium_"))
+                        && o.HasAnyProperty("CustomItemDatas")
+                )
+                .ToList();
+
+            foreach (var o in validStored)
+            {
+                var customData = o.Properties.First(p => p.NameString == "CustomItemDatas") as PropertyArray;
+                var cryoDataOffset = 0;
+
+                if (customData != null)
+                {
+
+                    var dataByteArray = customData?.Value as ArkArrayUnknown;
+                    if (dataByteArray != null)
+                    {
+                        var dataBytes = dataByteArray?.ToArray<byte>();
+
+                        if (dataBytes != null && dataBytes.Length > 0)
+                        {
+                            using (MemoryStream ms = new MemoryStream(dataBytes))
+                            {
+                                using (ArkArchive a = new ArkArchive(ms))
+                                {
+
+                                    if (dataByteArray?.Count >= 34)
+                                    {
+                                        var cryoUnknown1 = a.ReadShort();
+                                        var cryoUnknown2 = a.ReadInt();
+
+                                        cryoDataOffset = a.ReadInt();
+
+                                        var cryoUnknown3 = a.ReadInt();
+                                        var cryoUnknown4 = a.ReadInt();
+                                        var cryoUnknown5 = a.ReadInt();
+                                        var cryoUnknown6 = a.ReadInt();
+                                        var cryoUnknown7 = a.ReadInt();
+                                        var cryoUnknown8 = a.ReadInt();
+
+                                    }
+                                    else
+                                    {
+                                        cryoDataOffset = 0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+
+                    var creatureDataOffset = cryoDataOffset + storedOffset;
+                    archive.Position = creatureDataOffset;
+
+                    var objectType = archive.ReadString(); //type?
+                    if (objectType.Equals("dino", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        var unknown1 = archive.ReadInt(); //unknown
+                        var className = archive.ReadString(); //classname
+                        var nameAndLevel = archive.ReadString(); //name and level
+                        var colorCodeCsv = archive.ReadString(); //csv list of color #
+                        var unknown2 = archive.ReadInt();//?
+                        var gender = archive.ReadString(); //gender
+
+                        archive.SkipBytes(14);//?
+
+                        var hp = archive.ReadFloat();
+                        var stamina = archive.ReadFloat();
+                        var weight = archive.ReadFloat();
+                        var oxy = archive.ReadFloat();
+                        var food = archive.ReadFloat();
+                        var speed = archive.ReadFloat();
+                        var imprint = archive.ReadFloat();
+                        var torpor = archive.ReadFloat();
+
+
+                        archive.SkipBytes(16); //unknown, need to identify
+
+                        var hpMax = archive.ReadFloat();
+                        var staminaMax = archive.ReadFloat();
+                        var weightMax = archive.ReadFloat();
+                        var oxyMax = archive.ReadFloat();
+                        var foodMax = archive.ReadFloat();
+                        var speedMax = archive.ReadFloat();
+                        var imprintMax = archive.ReadFloat();
+                        var torporMax = archive.ReadFloat();
+
+                        archive.SkipBytes(20);//?
+
+                        var colorCount = archive.ReadInt(); //color name count
+                        List<string> colorNames = new List<string>();
+                        while (colorCount-- > 0)
+                        {
+                            var colorName = archive.ReadString();
+                            colorNames.Add(colorName);
+                        }
+
+                    }
+
+
+                    archive.SkipBytes(8);//?
+                    var propertyStartOffset = archive.Position;
+
+                    var objectCount = archive.ReadInt();
+                    bool useNameTable = archive.UseNameTable;
+                    archive.UseNameTable = false;
+
+
+                    GameObject dinoComponent = null;
+                    GameObject dinoCharacterStatusComponent = null;
+                    GameObject dinoTamedInventoryComponent = null;
+
+                    if (objectCount > 0)
+                    {
+                        dinoComponent = new GameObject(archive); //Rex_Character_BP_C
+                    }
+
+                    if (objectCount > 1)
+                    {
+                        dinoCharacterStatusComponent = new GameObject(archive); //DinoCharacterStatusComponent_BP_Rex_C
+                    }
+
+                    if (objectCount > 2)
+                    {
+                        dinoTamedInventoryComponent = new GameObject(archive); //DinoTamedInventoryComponent_Rex_C
+                    }
+
+                    //re-map and add properties as appropriate
+                    if (dinoComponent != null)
+                    {
+                        dinoComponent.LoadProperties(archive, new GameObject(), (int)propertyStartOffset);
+                        
+                        // the tribe name is stored in `TamerString`, non-cryoed creatures have the property `TribeName` for that.
+                        if (dinoComponent.GetPropertyValue<string>("TribeName")?.Length == 0 && dinoComponent.GetPropertyValue<string>("TamerString")?.Length > 0)
+                            dinoComponent.Properties.Add(new PropertyString("TribeName", dinoComponent.GetPropertyValue<string>("TamerString")));
+
+
+                        //get parent of cryopod owner inventory
+                        var podParentRef = o.GetPropertyValue<ObjectReference>("OwnerInventory");
+                        if (podParentRef != null)
+                        {
+                            var podParent = inventoryContainers.FirstOrDefault(i => i.GetPropertyValue<ObjectReference>("MyInventoryComponent")?.ObjectId == podParentRef.ObjectId);
+
+                            //determine if we need to re-team the podded animal
+                            if (podParent != null)
+                            {
+     
+                                int obTeam = dinoComponent.GetPropertyValue<int>("TargetingTeam");
+                                int containerTeam = podParent.GetPropertyValue<int>("TargetingTeam");
+                                if (obTeam != containerTeam)
+                                {
+                                    var propertyIndex = dinoComponent.Properties.FindIndex(i => i.NameString == "TargetingTeam");
+                                    if (propertyIndex != -1)
+                                    {
+                                        dinoComponent.Properties.RemoveAt(propertyIndex);
+                                    }
+                                    dinoComponent.Properties.Add(new PropertyInt("TargetingTeam", containerTeam));
+
+
+                                    if (dinoComponent.HasAnyProperty("TamingTeamID"))
+                                    {
+                                        dinoComponent.Properties.RemoveAt(dinoComponent.Properties.FindIndex(i => i.NameString == "TamingTeamID"));
+                                        dinoComponent.Properties.Add(new PropertyInt("TamingTeamID", containerTeam));
+                                    }
+
+                                }
+                            }
+                        }
+
+                        if (dinoCharacterStatusComponent != null)
+                        {
+                            dinoCharacterStatusComponent.LoadProperties(archive, new GameObject(), (int)propertyStartOffset);
+                            addObject(dinoCharacterStatusComponent, true);
+
+                            var statusComponentRef = dinoComponent.GetTypedProperty<PropertyObject>("MyCharacterStatusComponent");
+                            statusComponentRef.Value.ObjectId = dinoCharacterStatusComponent.Id;
+
+                        }
+
+                        if (dinoTamedInventoryComponent != null)
+                        {
+                            dinoTamedInventoryComponent.LoadProperties(archive, new GameObject(), (int)propertyStartOffset);
+                            addObject(dinoTamedInventoryComponent, true);
+
+                            var inventoryComponentRef = dinoComponent.GetTypedProperty<PropertyObject>("MyInventoryComponent");
+                            inventoryComponentRef.Value.ObjectId = dinoTamedInventoryComponent.Id;
+                        }
+
+
+                        addObject(dinoComponent, true);
+                    }
+
+                    archive.UseNameTable = useNameTable;
+
+                }
+            }
+        }
+
 
         private void extractBinaryObjectCryopods(ReadingOptions options)
         {
