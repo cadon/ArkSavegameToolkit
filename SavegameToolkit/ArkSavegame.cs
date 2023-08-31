@@ -357,6 +357,7 @@ namespace SavegameToolkit
 
             archive.Position = hibernationOffset;
 
+            /*
             if (SaveVersion > 7)
             {
                 hibernationV8Unknown1 = archive.ReadInt();
@@ -382,6 +383,16 @@ namespace SavegameToolkit
                     throw new NotSupportedException("349.10 workaround for duplicate unknown hibernation bytes failed");
                 }
             }
+            */
+
+            while (archive.Position < nameTableOffset)
+            {
+                //regardless of anything before the hibernated class count always seems to follow immediately after this byte in all save formats I have worked on.
+                if (archive.ReadSByte() == -52) 
+                {
+                    break;
+                }
+            }
 
             // No hibernate section if we reached the nameTable
             if (archive.Position == nameTableOffset)
@@ -389,8 +400,10 @@ namespace SavegameToolkit
                 return;
             }
 
+            /*
             hibernationUnknown1 = archive.ReadInt();
             hibernationUnknown2 = archive.ReadInt();
+            */
 
             int hibernatedClassesCount = archive.ReadInt();
 
