@@ -473,19 +473,11 @@ namespace SavegameToolkit
                                 using (ArkArchive a = new ArkArchive(ms))
                                 {
 
-                                    if (dataByteArray?.Count >= 34)
+                                    if (dataByteArray?.Count >= 10) //only care about first 10 bytes, not sure sure what comes after that.
                                     {
                                         var cryoUnknown1 = a.ReadShort();
                                         var cryoUnknown2 = a.ReadInt();
-
                                         cryoDataOffset = a.ReadInt();
-
-                                        var cryoUnknown3 = a.ReadInt();
-                                        var cryoUnknown4 = a.ReadInt();
-                                        var cryoUnknown5 = a.ReadInt();
-                                        var cryoUnknown6 = a.ReadInt();
-                                        var cryoUnknown7 = a.ReadInt();
-                                        var cryoUnknown8 = a.ReadInt();
 
                                     }
                                     else

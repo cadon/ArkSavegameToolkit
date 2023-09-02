@@ -36,26 +36,28 @@ namespace SavegameToolkit
                 {
                     var colorName = archive.ReadString();
                 }
+
+
+                var cryoStoreUnknown1 = archive.ReadLong();
+
+                //store properties offset
+                propertiesOffset = archive.Position;
+
+                //load GameObjects
+                Objects.Clear();
+
+                bool useNameTable = archive.UseNameTable;
+                archive.UseNameTable = false;
+
+                var objectCount = archive.ReadInt();
+                while (objectCount-- > 0)
+                {
+                    Objects.Add(new GameObject(archive));
+                }
+
+                archive.UseNameTable = useNameTable;
             }
 
-            var cryoStoreUnknown1 = archive.ReadLong();
-
-            //store properties offset
-            propertiesOffset = archive.Position;
-
-            //load GameObjects
-            Objects.Clear();
-
-            bool useNameTable = archive.UseNameTable;
-            archive.UseNameTable = false;
-
-            var objectCount = archive.ReadInt();
-            while (objectCount-- > 0)
-            {
-                Objects.Add(new GameObject(archive));
-            }
-
-            archive.UseNameTable = useNameTable;
 
         }
 
