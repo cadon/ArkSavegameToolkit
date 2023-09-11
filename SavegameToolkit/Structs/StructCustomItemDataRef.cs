@@ -10,18 +10,21 @@ namespace SavegameToolkit.Structs {
     public class StructCustomItemDataRef : StructBase {
 
         [JsonProperty(Order = 0)]
-        public short Unknown0 { get; private set; }
+        public byte Unknown0 { get; private set; }       
         [JsonProperty(Order = 1)]
-        public long Position { get; private set; }
+        public byte StoreDataIndex{ get; private set; }
         [JsonProperty(Order = 2)]
-        public ObjectReference[] ObjectRefs { get; private set; }
+        public long Position { get; private set; }
         [JsonProperty(Order = 3)]
+        public ObjectReference[] ObjectRefs { get; private set; }
+        [JsonProperty(Order = 4)]
         public ObjectReference[] ClassRefs { get; private set; }
 
         public override void Init(ArkArchive archive)
         {
             // The first unknown field may be two fields - perhaps format version and archive index
-            Unknown0 = archive.ReadShort();
+            Unknown0 = archive.ReadByte();
+            StoreDataIndex = archive.ReadByte();
             Position = archive.ReadLong();
             ObjectRefs = new ObjectReference[archive.ReadInt()];
             for (int index = 0; index < ObjectRefs.Length; index++)
