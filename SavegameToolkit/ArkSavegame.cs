@@ -473,11 +473,12 @@ namespace SavegameToolkit
                     archive.SaveVersion > 10
                     && customData.Value is ArkArrayStruct redirectors
                     && redirectors.All(r => r is StructCustomItemDataRef)
-)
+                    )
                 {
-                    // TODO: probably best to: in cryos, take first entry. in souls, take second.
-                    cryoDataOffset = ((StructCustomItemDataRef)redirectors[0]).Position;
-                    dataFile = ((StructCustomItemDataRef)redirectors[0]).StoreDataIndex;
+                    // cryopods use the first redirector, soulballs use the second
+                    var redirectorIndex = o.ClassName.Name.Contains("Cryopod") ? 0 : 1;
+                    cryoDataOffset = ((StructCustomItemDataRef)redirectors[redirectorIndex]).Position;
+                    dataFile = ((StructCustomItemDataRef)redirectors[redirectorIndex]).StoreDataIndex;
                 }
 
                 storedOffsets.Add(new CryoStoreData() { ParentObject = x, Offset = cryoDataOffset, StoreDataIndex = dataFile });

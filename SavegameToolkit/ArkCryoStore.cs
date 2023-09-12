@@ -13,8 +13,8 @@ namespace SavegameToolkit
 
         public void ReadBinary(ArkArchive archive)
         {
-            var objectType = archive.ReadString().ToLowerInvariant(); // type?
-            if (objectType != "dino" && objectType != "settings") return;
+            // check object type
+            if (archive.ReadString().ToLowerInvariant() != "dino") return;
 
             var stringPropertyCount = archive.ReadInt();
             while (stringPropertyCount-- > 0)
