@@ -387,7 +387,6 @@ namespace SavegameToolkit
 
                 TribeDataStore.ReadBinary(archive, options);
                 PlayerDataStore.ReadBinary(archive, options);
-
             }
 
             // No hibernate section if we reached the nameTable
@@ -395,7 +394,6 @@ namespace SavegameToolkit
             {
                 return;
             }
-
 
             hibernationUnknown1 = archive.ReadInt();
             hibernationUnknown2 = archive.ReadInt();
@@ -472,7 +470,6 @@ namespace SavegameToolkit
                         Tribes.AddRange(storedTribe.Objects);
                     }
                 }
-
             }
         }
 
@@ -514,12 +511,8 @@ namespace SavegameToolkit
                         Profiles.AddRange(storedProfile.Objects);
                     }
                 }
-
             }
-
-
         }
-
 
         private void readBinaryStoredObjects(ArkArchive archive, ReadingOptions options)
         {
@@ -556,9 +549,9 @@ namespace SavegameToolkit
                 {
                     // cryopods use the first redirector, soulballs use the second
                     var redirectorIndex = x.ClassString.Contains("Cryopod") ? 0 : 1;
-                    
+
                     // ensure redir
-                    if(redirectorIndex < redirectors.Count)
+                    if (redirectorIndex < redirectors.Count)
                     {
                         cryoDataOffset = ((StructCustomItemDataRef)redirectors[redirectorIndex]).Position;
                         dataFile = ((StructCustomItemDataRef)redirectors[redirectorIndex]).StoreDataIndex;
@@ -618,7 +611,7 @@ namespace SavegameToolkit
                     var dinoStorage = cryoObjects.Item1;
                     var dinoComponent = cryoObjects.Item2;
                     var dinoCharacterStatusComponent = cryoObjects.Item3;
-                    var dinoInventoryComponent = cryoObjects.Item3;
+                    var dinoInventoryComponent = cryoObjects.Item4;
 
                     //re-map and add properties as appropriate
                     if (dinoComponent == null) return;
@@ -669,6 +662,8 @@ namespace SavegameToolkit
                         var statusComponentRef = dinoComponent.GetTypedProperty<PropertyObject>("MyCharacterStatusComponent");
                         statusComponentRef.Value.ObjectId = dinoCharacterStatusComponent.Id;
 
+                        dinoComponent.AddComponent(dinoCharacterStatusComponent);
+                        dinoCharacterStatusComponent.Parent = dinoComponent;
                     }
 
                     if (dinoInventoryComponent != null)
@@ -677,16 +672,15 @@ namespace SavegameToolkit
 
                         var inventoryComponentRef = dinoComponent.GetTypedProperty<PropertyObject>("MyInventoryComponent");
                         inventoryComponentRef.Value.ObjectId = dinoInventoryComponent.Id;
+
+                        dinoComponent.AddComponent(dinoInventoryComponent);
+                        dinoInventoryComponent.Parent = dinoComponent;
                     }
 
                     addObject(dinoComponent, false);
-
                 });
             }
-
-
         }
-
 
         private void extractBinaryObjectCryopods(ReadingOptions options)
         {
