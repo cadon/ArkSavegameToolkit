@@ -593,12 +593,14 @@ namespace SavegameToolkit
 
                         archive.Position = storedOffset;
                         ArkCryoStore cryoStore = new ArkCryoStore(archive);
-                        if (cryoStore.Objects.Any())
+                        var objCount = cryoStore.Objects.Count;
+                        // at least the dino object and the status component are needed
+                        if (objCount > 1)
                         {
                             cryoStore.LoadProperties(archive);
 
                             //Store all required GameObjects to correctly read in this cryo creature
-                            addedCryoObjects.Add(new Tuple<GameObject, GameObject, GameObject, GameObject>(storedObject.ParentObject, cryoStore.Objects[0], cryoStore.Objects[1], cryoStore.Objects[2]));
+                            addedCryoObjects.Add(new Tuple<GameObject, GameObject, GameObject, GameObject>(storedObject.ParentObject, cryoStore.Objects[0], cryoStore.Objects[1], objCount > 2 ? cryoStore.Objects[2] : null));
                         }
                     }
                 }

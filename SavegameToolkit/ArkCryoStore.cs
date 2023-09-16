@@ -63,7 +63,7 @@ namespace SavegameToolkit
 
             for (int i = 0; i < Objects.Count; i++)
             {
-                Objects[i].LoadProperties(archive, new GameObject(), (int)propertiesOffset);
+                Objects[i].LoadProperties(archive, new GameObject(), propertiesOffset);
             }
 
             archive.Position = pos;
