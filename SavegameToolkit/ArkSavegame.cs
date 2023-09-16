@@ -45,8 +45,14 @@ namespace SavegameToolkit
 
         [JsonProperty(Order = 7)]
         public override List<GameObject> Objects { get; } = new List<GameObject>();
+        public List<GameObject> Tribes { get; } = new List<GameObject>();
+        public List<GameObject> Profiles { get; } = new List<GameObject>();
 
         public List<Tuple<long, long>> StoredDataOffsets = new List<Tuple<long, long>>();
+
+        private ChunkedStore TribeDataStore { get; set; } = new ChunkedStore();
+        private ChunkedStore PlayerDataStore { get; set; } = new ChunkedStore();
+
 
         private int hibernationOffset;
 
@@ -86,6 +92,8 @@ namespace SavegameToolkit
         private int hibernationV9Check4;
         private int hibernationV9Check5;
         private int hibernationV9Check6;
+
+
 
         #region readBinary
 
@@ -371,36 +379,15 @@ namespace SavegameToolkit
             // it's assumed there are two new int32, making it a total of 6 unknown int32 along with the 4 version8 int32, the first two are -1 and 2, and all of these 6 int32 are repeated once.
             if (SaveVersion > 8 && hibernationV8Unknown1 == -1 && hibernationV8Unknown2 == 2)
             {
-                archive.DebugMessage("non-zero unknown V9 fields, expecting duplicated set per 349.10");
-                hibernationV9_34910Unknown1 = archive.ReadInt();
-                hibernationV9_34910Unknown2 = archive.ReadInt();
+                // Move back by those four integers, so we can use ChunkedStore
+                archive.Position -= sizeof(int) * 4;
 
+                TribeDataStore = new ChunkedStore();
+                PlayerDataStore = new ChunkedStore();
 
-                hibernationV9Check1 = archive.ReadInt();
-                hibernationV9Check2 = archive.ReadInt();
-                hibernationV9Check3 = archive.ReadInt();
-                hibernationV9Check4 = archive.ReadInt();
-                hibernationV9Check5 = archive.ReadInt();
-                hibernationV9Check6 = archive.ReadInt();
+                TribeDataStore.ReadBinary(archive, options);
+                PlayerDataStore.ReadBinary(archive, options);
 
-                if (!(hibernationV8Unknown1 == hibernationV9Check1
-                      && hibernationV8Unknown2 == hibernationV9Check2
-                      && hibernationV8Unknown3 == hibernationV9Check3
-                      && hibernationV8Unknown4 == hibernationV9Check4
-                      && hibernationV9_34910Unknown1 == hibernationV9Check5
-                      && hibernationV9_34910Unknown2 == hibernationV9Check6))
-                {
-                    if (SaveVersion > 10)
-                    {
-                        //TODO:// more data reads - is it always 112 bytes?
-                        archive.SkipBytes(112);
-
-                    }
-                    else
-                    {
-                        throw new NotSupportedException("349.10 workaround for duplicate unknown hibernation bytes failed");
-                    }
-                }
             }
 
             // No hibernate section if we reached the nameTable
@@ -446,6 +433,93 @@ namespace SavegameToolkit
                 HibernationEntries.Add(new HibernationEntry(archive, options));
             }
         }
+
+        private void readBinaryStoredTribes(ArkArchive archive, ReadingOptions options)
+        {
+            if (!options.StoredTribes) return;
+
+            Tribes.Clear();
+
+            if (TribeDataStore != null && TribeDataStore.IndexChunks.Count > 0)
+            {
+                for (int tribeFileIndex = 0; tribeFileIndex < TribeDataStore.IndexChunks.Count; tribeFileIndex++)
+                {
+                    long storedIndexOffset = StoredDataOffsets[tribeFileIndex].Item1 + TribeDataStore.IndexChunks[tribeFileIndex].ArchiveOffset;
+                    long storedIndexSize = TribeDataStore.IndexChunks[tribeFileIndex].Size;
+                    long storedDataOffset = StoredDataOffsets[tribeFileIndex].Item1 + TribeDataStore.DataChunks[tribeFileIndex].ArchiveOffset;
+
+
+                    archive.Position = storedIndexOffset;
+                    long indexLimit = storedIndexSize + storedIndexOffset;
+
+                    List<long> tribeOffsets = new List<long>();
+                    while (archive.Position < indexLimit)
+                    {
+                        long tribeId = archive.ReadLong();
+                        long tribeOffset = archive.ReadLong();
+                        long tribeSize = archive.ReadLong();
+
+                        long tribeDataOffset = storedDataOffset + tribeOffset;
+                        tribeOffsets.Add(tribeDataOffset);
+                    }
+
+                    foreach (var tribeOffset in tribeOffsets)
+                    {
+                        archive.Position = tribeOffset;
+                        ArkStoreTribe storedTribe = new ArkStoreTribe();
+                        storedTribe.ReadBinary(archive, options);
+
+                        Tribes.AddRange(storedTribe.Objects);
+                    }
+                }
+
+            }
+        }
+
+        private void readBinaryStoredProfiles(ArkArchive archive, ReadingOptions options)
+        {
+            if (!options.StoredProfiles) return;
+
+            Profiles.Clear();
+
+            if (PlayerDataStore != null && PlayerDataStore.IndexChunks.Count > 0)
+            {
+                for (int playerFileIndex = 0; playerFileIndex < PlayerDataStore.IndexChunks.Count; playerFileIndex++)
+                {
+                    long storedIndexOffset = StoredDataOffsets[playerFileIndex].Item1 + PlayerDataStore.IndexChunks[playerFileIndex].ArchiveOffset;
+                    long storedIndexSize = PlayerDataStore.IndexChunks[playerFileIndex].Size;
+                    long storedDataOffset = StoredDataOffsets[playerFileIndex].Item1 + PlayerDataStore.DataChunks[playerFileIndex].ArchiveOffset;
+
+
+                    archive.Position = storedIndexOffset;
+                    long indexLimit = storedIndexSize + storedIndexOffset;
+
+                    List<long> playerOffsets = new List<long>();
+                    while (archive.Position < indexLimit)
+                    {
+                        long playerId = archive.ReadLong();
+                        long playerOffset = archive.ReadLong();
+                        long playerSize = archive.ReadLong();
+
+                        long playerDataOffset = storedDataOffset + playerOffset;
+                        playerOffsets.Add(playerDataOffset);
+                    }
+
+                    foreach (var playerOffset in playerOffsets)
+                    {
+                        archive.Position = playerOffset;
+                        ArkStoreProfile storedProfile = new ArkStoreProfile();
+                        storedProfile.ReadBinary(archive, options);
+
+                        Profiles.AddRange(storedProfile.Objects);
+                    }
+                }
+
+            }
+
+
+        }
+
 
         private void readBinaryStoredObjects(ArkArchive archive, ReadingOptions options)
         {

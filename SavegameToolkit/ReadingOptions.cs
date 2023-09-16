@@ -65,6 +65,8 @@ namespace SavegameToolkit
         /// <code>true</code> if reading, <code>false</code> if skipping
         /// </summary>
         public bool CryopodCreatures { get; private set; } = true;
+        public bool StoredTribes { get; set; } = false;
+        public bool StoredProfiles { get; set; } = false;
 
         public bool BuildComponentTree { get; private set; }
 
@@ -170,6 +172,19 @@ namespace SavegameToolkit
             CryopodCreatures = cryopodCreatures;
             return this;
         }
+
+        public ReadingOptions WithStoredTribes(bool storedTribes)
+        {
+            StoredTribes = storedTribes;
+            return this;
+        }
+
+        public ReadingOptions WithStoredProfiles(bool storedProfiles)
+        {
+            StoredProfiles = storedProfiles;
+            return this;
+        }
+
 
         public ReadingOptions WithBuildComponentTree(bool buildComponentTree)
         {
