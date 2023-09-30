@@ -514,11 +514,12 @@ namespace SavegameToolkit
             }
         }
 
+        /// <summary>
+        /// Read binary objects stored in cryopods and other containers.
+        /// </summary>
         private void readBinaryStoredObjects(ArkArchive archive, ReadingOptions options)
         {
             if (!options.CryopodCreatures) return;
-
-            var inventoryContainers = Objects.AsParallel().Where(x => x.GetPropertyValue<ObjectReference>("MyInventoryComponent") != null).ToList();
 
             var validStored = Objects.AsParallel()
                 .Where(o =>
@@ -557,14 +558,11 @@ namespace SavegameToolkit
                         dataFile = ((StructCustomItemDataRef)redirectors[redirectorIndex]).StoreDataIndex;
 
                         //store to be read-in forward-only for performance.
-                        storedItemsWithOffsets[dataFile].Add(new StoredItemOffset() { ParentObject = x, ObjectOffset = cryoDataOffset });
+                        storedItemsWithOffsets[dataFile].Add(new StoredItemOffset { ParentObject = x, ObjectOffset = cryoDataOffset });
                     }
                 }
-
             });
             validStored = null;
-
-
 
 
             // parse stored data in offset order, adding parsed objects to list
@@ -599,89 +597,98 @@ namespace SavegameToolkit
                         {
                             cryoStore.LoadProperties(archive);
 
-                            //Store all required GameObjects to correctly read in this cryo creature
-                            addedCryoObjects.Add(new Tuple<GameObject, GameObject, GameObject, GameObject>(storedObject.ParentObject, cryoStore.Objects[0], cryoStore.Objects[1], objCount > 2 ? cryoStore.Objects[2] : null));
+                            var dinoComponent = cryoStore.Objects[0]; // assuming dinoComponent is always the first object
+                            if (dinoComponent != null)
+                            {
+                                // usually Objects[1] is DCSC and Objects[2] is dinoInventoryComponent    
+                                // for some creatures with multiple components the order of components is different (e.g. Fjordhawk has components of owner)
+                                var dinoCharacterStatusComponent = cryoStore.Objects.FirstOrDefault(o => o.ClassString.StartsWith("DinoCharacterStatusComponent"));
+                                var dinoInventoryComponent = cryoStore.Objects.FirstOrDefault(o => o.ClassString.StartsWith("DinoTamedInventoryComponent"));
+
+                                //Store all required GameObjects to correctly read in this cryo creature
+                                addedCryoObjects.Add(new Tuple<GameObject, GameObject, GameObject, GameObject>(
+                                    storedObject.ParentObject, dinoComponent, dinoCharacterStatusComponent, dinoInventoryComponent));
+                            }
                         }
                     }
                 }
             }
 
-            if (addedCryoObjects.Count > 0)
+            if (addedCryoObjects.Count == 0) return;
+
+            var inventoryContainers = Objects.AsParallel().Select(x => (x, MyInventoryComponent: x.GetPropertyValue<ObjectReference>("MyInventoryComponent")))
+                .Where(x => x.MyInventoryComponent != null)
+                .ToDictionary(x => x.MyInventoryComponent.ObjectId, x => x.x);
+
+            Parallel.ForEach(addedCryoObjects, cryoObjects =>
             {
-                Parallel.ForEach(addedCryoObjects, cryoObjects =>
+                var dinoStorage = cryoObjects.Item1;
+                var dinoComponent = cryoObjects.Item2;
+                var dinoCharacterStatusComponent = cryoObjects.Item3;
+                var dinoInventoryComponent = cryoObjects.Item4;
+
+                if (dinoComponent == null) return;
+
+                //re-map and add properties as appropriate
+                dinoComponent.IsInCryo = true;
+
+                // the tribe name is stored in `TamerString`, non-cryoed creatures have the property `TribeName` for that.
+                if (dinoComponent.GetPropertyValue<string>("TribeName")?.Length == 0 && dinoComponent.GetPropertyValue<string>("TamerString")?.Length > 0)
+                    dinoComponent.Properties.Add(new PropertyString("TribeName", dinoComponent.GetPropertyValue<string>("TamerString")));
+
+                //get parent of cryopod owner inventory
+                var podParentRef = dinoStorage.GetPropertyValue<ObjectReference>("OwnerInventory");
+                if (podParentRef != null
+                    && inventoryContainers.TryGetValue(podParentRef.ObjectId, out var podParent))
                 {
-                    var dinoStorage = cryoObjects.Item1;
-                    var dinoComponent = cryoObjects.Item2;
-                    var dinoCharacterStatusComponent = cryoObjects.Item3;
-                    var dinoInventoryComponent = cryoObjects.Item4;
+                    // re-team the podded animal
+                    dinoComponent.Parent = podParent;
 
-                    //re-map and add properties as appropriate
-                    if (dinoComponent == null) return;
-
-                    dinoComponent.IsInCryo = true;
-
-                    // the tribe name is stored in `TamerString`, non-cryoed creatures have the property `TribeName` for that.
-                    if (dinoComponent.GetPropertyValue<string>("TribeName")?.Length == 0 && dinoComponent.GetPropertyValue<string>("TamerString")?.Length > 0)
-                        dinoComponent.Properties.Add(new PropertyString("TribeName", dinoComponent.GetPropertyValue<string>("TamerString")));
-
-                    //get parent of cryopod owner inventory
-                    var podParentRef = dinoStorage.GetPropertyValue<ObjectReference>("OwnerInventory");
-                    if (podParentRef != null)
+                    int obTeam = dinoComponent.GetPropertyValue<int>("TargetingTeam");
+                    int containerTeam = podParent.GetPropertyValue<int>("TargetingTeam");
+                    if (obTeam != containerTeam)
                     {
-                        var podParent = inventoryContainers.FirstOrDefault(x => x.GetPropertyValue<ObjectReference>("MyInventoryComponent")?.ObjectId == podParentRef.ObjectId);
-
-                        //determine if we need to re-team the podded animal
-                        if (podParent != null)
+                        var propertyIndex = dinoComponent.Properties.FindIndex(i => i.NameString == "TargetingTeam");
+                        if (propertyIndex != -1)
                         {
-                            dinoComponent.Parent = podParent;
-
-                            int obTeam = dinoComponent.GetPropertyValue<int>("TargetingTeam");
-                            int containerTeam = podParent.GetPropertyValue<int>("TargetingTeam");
-                            if (obTeam != containerTeam)
-                            {
-                                var propertyIndex = dinoComponent.Properties.FindIndex(i => i.NameString == "TargetingTeam");
-                                if (propertyIndex != -1)
-                                {
-                                    dinoComponent.Properties.RemoveAt(propertyIndex);
-                                }
-                                dinoComponent.Properties.Add(new PropertyInt("TargetingTeam", containerTeam));
+                            dinoComponent.Properties.RemoveAt(propertyIndex);
+                        }
+                        dinoComponent.Properties.Add(new PropertyInt("TargetingTeam", containerTeam));
 
 
-                                if (dinoComponent.HasAnyProperty("TamingTeamID"))
-                                {
-                                    dinoComponent.Properties.RemoveAt(dinoComponent.Properties.FindIndex(i => i.NameString == "TamingTeamID"));
-                                    dinoComponent.Properties.Add(new PropertyInt("TamingTeamID", containerTeam));
-                                }
-
-                            }
+                        if (dinoComponent.HasAnyProperty("TamingTeamID"))
+                        {
+                            dinoComponent.Properties.RemoveAt(dinoComponent.Properties.FindIndex(i => i.NameString == "TamingTeamID"));
+                            dinoComponent.Properties.Add(new PropertyInt("TamingTeamID", containerTeam));
                         }
                     }
+                }
 
-                    if (dinoCharacterStatusComponent != null)
-                    {
-                        addObject(dinoCharacterStatusComponent, false);
+                if (dinoCharacterStatusComponent != null
+                    && dinoComponent.GetTypedProperty<PropertyObject>("MyCharacterStatusComponent") is PropertyObject statusComponentRef)
+                {
+                    addObject(dinoCharacterStatusComponent, false);
 
-                        var statusComponentRef = dinoComponent.GetTypedProperty<PropertyObject>("MyCharacterStatusComponent");
-                        statusComponentRef.Value.ObjectId = dinoCharacterStatusComponent.Id;
+                    statusComponentRef.Value.ObjectId = dinoCharacterStatusComponent.Id;
 
-                        dinoComponent.AddComponent(dinoCharacterStatusComponent);
-                        dinoCharacterStatusComponent.Parent = dinoComponent;
-                    }
+                    dinoComponent.AddComponent(dinoCharacterStatusComponent);
+                    dinoCharacterStatusComponent.Parent = dinoComponent;
+                }
 
-                    if (dinoInventoryComponent != null)
-                    {
-                        addObject(dinoInventoryComponent, false);
+                if (dinoInventoryComponent != null
+                   && dinoComponent.GetTypedProperty<PropertyObject>("MyInventoryComponent") is PropertyObject inventoryComponentRef
+                   )
+                {
+                    addObject(dinoInventoryComponent, false);
 
-                        var inventoryComponentRef = dinoComponent.GetTypedProperty<PropertyObject>("MyInventoryComponent");
-                        inventoryComponentRef.Value.ObjectId = dinoInventoryComponent.Id;
+                    inventoryComponentRef.Value.ObjectId = dinoInventoryComponent.Id;
 
-                        dinoComponent.AddComponent(dinoInventoryComponent);
-                        dinoInventoryComponent.Parent = dinoComponent;
-                    }
+                    dinoComponent.AddComponent(dinoInventoryComponent);
+                    dinoInventoryComponent.Parent = dinoComponent;
+                }
 
-                    addObject(dinoComponent, false);
-                });
-            }
+                addObject(dinoComponent, false);
+            });
         }
 
         private void extractBinaryObjectCryopods(ReadingOptions options)
