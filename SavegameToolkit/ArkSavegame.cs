@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -702,150 +701,177 @@ namespace SavegameToolkit
 
             foreach (var cryo in cryopods)
             {
-                ArkArrayStruct customItemDatas = cryo.GetPropertyValue<IArkArray, ArkArrayStruct>("CustomItemDatas");
-                StructPropertyList customDinoData = (StructPropertyList)customItemDatas?.FirstOrDefault(cd => ((StructPropertyList)cd).GetTypedProperty<PropertyName>("CustomDataName").Value.Name == "Dino");
-                PropertyStruct customDataBytes = customDinoData?.Properties.FirstOrDefault(p => p.NameString == "CustomDataBytes") as PropertyStruct;
-                PropertyArray byteArrays = (customDataBytes?.Value as StructPropertyList)?.Properties.FirstOrDefault(property => property.NameString == "ByteArrays") as PropertyArray;
-                ArkArrayStruct byteArraysValue = byteArrays?.Value as ArkArrayStruct;
-                if (byteArraysValue?.Any() != true) continue;
-
-                ArkArrayUInt8 creatureBytes = ((byteArraysValue[0] as StructPropertyList)?.Properties.FirstOrDefault(p => p.NameString == "Bytes") as PropertyArray)?.Value as ArkArrayUInt8;
-                if (creatureBytes?.Any() != true) continue;
-
-                var cryoStream = new System.IO.MemoryStream(creatureBytes.ToArray<byte>());
-
-                using (ArkArchive cryoArchive = new ArkArchive(cryoStream))
+                try
                 {
-                    // number of serialized objects
-                    int objCount = cryoArchive.ReadInt();
-                    if (objCount == 0) continue;
+                    ArkArrayStruct customItemDatas = cryo.GetPropertyValue<IArkArray, ArkArrayStruct>("CustomItemDatas");
+                    StructPropertyList customDinoData = (StructPropertyList)customItemDatas?.FirstOrDefault(cd =>
+                        ((StructPropertyList)cd).GetTypedProperty<PropertyName>("CustomDataName").Value.Name == "Dino");
+                    PropertyStruct customDataBytes = customDinoData?.Properties.FirstOrDefault(p => p.NameString == "CustomDataBytes") as PropertyStruct;
+                    PropertyArray byteArrays = (customDataBytes?.Value as StructPropertyList)?.Properties.FirstOrDefault(property =>
+                            property.NameString == "ByteArrays") as PropertyArray;
+                    ArkArrayStruct byteArraysValue = byteArrays?.Value as ArkArrayStruct;
+                    if (byteArraysValue?.Any() != true) continue;
 
-                    var storedGameObjects = new List<GameObject>(objCount);
-                    for (int oi = 0; oi < objCount; oi++)
-                    {
-                        storedGameObjects.Add(new GameObject(cryoArchive));
-                    }
-                    foreach (var ob in storedGameObjects)
-                    {
-                        ob.LoadProperties(cryoArchive, new GameObject(), 0);
-                    }
+                    ArkArrayUInt8 creatureBytes = ((byteArraysValue[0] as StructPropertyList)?.Properties.FirstOrDefault(p =>
+                            p.NameString == "Bytes") as PropertyArray)?.Value as ArkArrayUInt8;
+                    if (creatureBytes?.Any() != true) continue;
 
-                    // assume the first object is the creature object
-                    string creatureActorId = storedGameObjects[0].Names[0].ToString();
-                    storedGameObjects[0].IsInCryo = true;
+                    var cryoStream = new System.IO.MemoryStream(creatureBytes.ToArray<byte>());
 
-                    // the tribe name is stored in `TamerString`, non-cryoed creatures have the property `TribeName` for that.
-                    if (!storedGameObjects[0].HasAnyProperty("TribeName"))
+                    using (ArkArchive cryoArchive = new ArkArchive(cryoStream))
                     {
-                        if (storedGameObjects[0].HasAnyProperty("TamerString"))
-                            storedGameObjects[0].Properties.Add(new PropertyString("TribeName", storedGameObjects[0].GetPropertyValue<string>("TamerString")));
-                        else
+                        // number of serialized objects
+                        int objCount = cryoArchive.ReadInt();
+                        if (objCount == 0) continue;
+
+                        var storedGameObjects = new List<GameObject>(objCount);
+                        for (int oi = 0; oi < objCount; oi++)
                         {
-                            // if a creature is cryoed and unclaimed, determine the owner of the container the cryopod is in and set that as the owner
-                            var ownerInventoryProperty = cryo.GetPropertyValue<ObjectReference>("OwnerInventory");
-                            if (ownerInventoryProperty != null)
+                            storedGameObjects.Add(new GameObject(cryoArchive));
+                        }
+
+                        foreach (var ob in storedGameObjects)
+                        {
+                            ob.LoadProperties(cryoArchive, new GameObject(), 0);
+                        }
+
+                        // assume the first object is the creature object
+                        string creatureActorId = storedGameObjects[0].Names[0].ToString();
+                        storedGameObjects[0].IsInCryo = true;
+
+                        // the tribe name is stored in `TamerString`, non-cryoed creatures have the property `TribeName` for that.
+                        if (!storedGameObjects[0].HasAnyProperty("TribeName"))
+                        {
+                            if (storedGameObjects[0].HasAnyProperty("TamerString"))
+                                storedGameObjects[0].Properties.Add(new PropertyString("TribeName",
+                                    storedGameObjects[0].GetPropertyValue<string>("TamerString")));
+                            else
                             {
-                                if (!soulTrapContainer.TryGetValue(ownerInventoryProperty.ObjectId, out var ownerString))
+                                // if a creature is cryoed and unclaimed, determine the owner of the container the cryopod is in and set that as the owner
+                                var ownerInventoryProperty = cryo.GetPropertyValue<ObjectReference>("OwnerInventory");
+                                if (ownerInventoryProperty != null)
                                 {
-                                    var inventoryObject =
-                                        Objects.FirstOrDefault(o => o.Id == ownerInventoryProperty.ObjectId);
-                                    ownerString = inventoryObject?.Parent?.GetPropertyValue<string>("OwnerName");
-                                    soulTrapContainer[ownerInventoryProperty.ObjectId] = ownerString;
+                                    if (!soulTrapContainer.TryGetValue(ownerInventoryProperty.ObjectId,
+                                            out var ownerString))
+                                    {
+                                        var inventoryObject =
+                                            Objects.FirstOrDefault(o => o.Id == ownerInventoryProperty.ObjectId);
+                                        ownerString = inventoryObject?.Parent?.GetPropertyValue<string>("OwnerName");
+                                        soulTrapContainer[ownerInventoryProperty.ObjectId] = ownerString;
+                                    }
+
+                                    if (!string.IsNullOrEmpty(ownerString))
+                                    {
+                                        storedGameObjects[0].Properties
+                                            .Add(new PropertyString("TribeName", ownerString));
+                                    }
                                 }
-
-                                if (!string.IsNullOrEmpty(ownerString))
-                                {
-                                    storedGameObjects[0].Properties.Add(new PropertyString("TribeName", ownerString));
-                                }
                             }
                         }
-                    }
 
-                    // add cryopod object as parent to all child objects of the creature object (ActorIDs are not unique across cryopodded and non-cryopodded creatures)
-                    // assume that child objects are stored after their parent objects
-                    for (int i = 0; i < objCount; i++)
-                    {
-                        var ob = storedGameObjects[i];
-                        int nIndex = ob.Names.FindIndex(n => n.ToString() == creatureActorId);
-                        if (nIndex != -1)
+                        // add cryopod object as parent to all child objects of the creature object (ActorIDs are not unique across cryopodded and non-cryopodded creatures)
+                        // assume that child objects are stored after their parent objects
+                        for (int i = 0; i < objCount; i++)
                         {
-                            ob.Names.Insert(nIndex + 1, cryo.Names[0]);
-                            addObject(ob, false); // processing the names can cause conflicts with reused ids
-                        }
-
-                        if (i == 0)
-                        {
-                            ob.Parent = cryo;
-                            for (int ii = 1; ii < objCount; ii++)
-                                ob.AddComponent(storedGameObjects[ii]);
-                        }
-                        else
-                        {
-                            ob.Parent = storedGameObjects[0];
-                        }
-                    }
-
-                    // assign the created ID of the components to the creature's properties
-                    AssignComponentId("DinoCharacterStatusComponent", "MyCharacterStatusComponent");
-                    AssignComponentId("DinoTamedInventoryComponent", "MyInventoryComponent");
-
-                    void AssignComponentId(string classStringStartsWith, string propertyName)
-                    {
-                        var statusComponentObject = storedGameObjects.FirstOrDefault(ob => ob.ClassString?.StartsWith(classStringStartsWith) ?? false);
-                        if (statusComponentObject == null) return;
-                        var statusComponentRef = storedGameObjects[0].GetTypedProperty<PropertyObject>(propertyName);
-                        if (statusComponentRef != null)
-                            statusComponentRef.Value.ObjectId = statusComponentObject.Id;
-                    }
-
-                    var isSoulTrap = cryo.ClassString.Contains("SoulTrap_");
-
-                    if (isSoulTrap)
-                    {
-                        // extract changed creature properties if they were changed in the soulTrap
-                        var customDataStrings = customDinoData.Properties.FirstOrDefault(p => p.NameString == "CustomDataStrings") as PropertyArray;
-                        if (customDataStrings?.Value is ArkArrayString stringArray)
-                        {
-                            // name
-                            if (stringArray.Count > 16
-                                && !string.IsNullOrEmpty(stringArray[16]))
+                            var ob = storedGameObjects[i];
+                            int nIndex = ob.Names.FindIndex(n => n.ToString() == creatureActorId);
+                            if (nIndex != -1)
                             {
-                                storedGameObjects[0].Properties.RemoveAll(p => p.NameString == "TamedName");
-                                storedGameObjects[0].Properties.Add(new PropertyString("TamedName", stringArray[16]));
+                                ob.Names.Insert(nIndex + 1, cryo.Names[0]);
+                                addObject(ob, false); // processing the names can cause conflicts with reused ids
                             }
-                            // neutered / spayed
-                            if (stringArray.Count > 3
-                                && stringArray[3] == "1")
+
+                            if (i == 0)
                             {
-                                storedGameObjects[0].Properties.RemoveAll(p => p.NameString == "bNeutered");
-                                storedGameObjects[0].Properties.Add(new PropertyBool("bNeutered", true));
+                                ob.Parent = cryo;
+                                for (int ii = 1; ii < objCount; ii++)
+                                    ob.AddComponent(storedGameObjects[ii]);
+                            }
+                            else
+                            {
+                                ob.Parent = storedGameObjects[0];
                             }
                         }
-                    }
 
-                    // the mating cooldown is not stored in the creature data, but in the cryoPod data. It's at index 2 in the Double array in the CustomDataDouble of the cryo object
-                    PropertyStruct customDataDoubles = customDinoData.Properties.FirstOrDefault(p => p.NameString == "CustomDataDoubles") as PropertyStruct;
-                    var doubleArray = ((customDataDoubles?.Value as StructPropertyList)?.Properties.FirstOrDefault(property => property.NameString == "Doubles") as PropertyArray)?.Value as ArkArrayDouble;
-                    if (doubleArray != null)
-                    {
-                        // for SoulTraps the matingCooldown is stored as delta seconds
+                        // assign the created ID of the components to the creature's properties
+                        AssignComponentId("DinoCharacterStatusComponent", "MyCharacterStatusComponent");
+                        AssignComponentId("DinoTamedInventoryComponent", "MyInventoryComponent");
+
+                        void AssignComponentId(string classStringStartsWith, string propertyName)
+                        {
+                            var statusComponentObject = storedGameObjects.FirstOrDefault(ob =>
+                                ob.ClassString?.StartsWith(classStringStartsWith) ?? false);
+                            if (statusComponentObject == null) return;
+                            var statusComponentRef =
+                                storedGameObjects[0].GetTypedProperty<PropertyObject>(propertyName);
+                            if (statusComponentRef != null)
+                                statusComponentRef.Value.ObjectId = statusComponentObject.Id;
+                        }
+
+                        var isSoulTrap = cryo.ClassString.Contains("SoulTrap_");
+
                         if (isSoulTrap)
                         {
-                            if (doubleArray.Count > 0 && doubleArray[0] > 0)
+                            // extract changed creature properties if they were changed in the soulTrap
+                            var customDataStrings =
+                                customDinoData.Properties.FirstOrDefault(p => p.NameString == "CustomDataStrings") as
+                                    PropertyArray;
+                            if (customDataStrings?.Value is ArkArrayString stringArray)
                             {
-                                var creatureCaughtInSoulBallSecondsAgo = 0; // GameTime - cryo.GetPropertyValue<double>("LastAutoDurabilityDecreaseTime"); // TODO this is not yet correct
-                                storedGameObjects[0].Properties.Add(new PropertyDouble("NextAllowedMatingTime", doubleArray[0] + GameTime - creatureCaughtInSoulBallSecondsAgo));
+                                // name
+                                if (stringArray.Count > 16
+                                    && !string.IsNullOrEmpty(stringArray[16]))
+                                {
+                                    storedGameObjects[0].Properties.RemoveAll(p => p.NameString == "TamedName");
+                                    storedGameObjects[0].Properties
+                                        .Add(new PropertyString("TamedName", stringArray[16]));
+                                }
+
+                                // neutered / spayed
+                                if (stringArray.Count > 3
+                                    && stringArray[3] == "1")
+                                {
+                                    storedGameObjects[0].Properties.RemoveAll(p => p.NameString == "bNeutered");
+                                    storedGameObjects[0].Properties.Add(new PropertyBool("bNeutered", true));
+                                }
                             }
                         }
-                        // for vanilla cryoPods the matingCooldown is saved as absolute seconds in game time
-                        else
+
+                        // the mating cooldown is not stored in the creature data, but in the cryoPod data. It's at index 2 in the Double array in the CustomDataDouble of the cryo object
+                        PropertyStruct customDataDoubles =
+                            customDinoData.Properties.FirstOrDefault(p => p.NameString == "CustomDataDoubles") as
+                                PropertyStruct;
+                        var doubleArray =
+                            ((customDataDoubles?.Value as StructPropertyList)?.Properties.FirstOrDefault(property =>
+                                property.NameString == "Doubles") as PropertyArray)?.Value as ArkArrayDouble;
+                        if (doubleArray != null)
                         {
-                            if (doubleArray.Count > 2 && doubleArray[2] > 0)
+                            // for SoulTraps the matingCooldown is stored as delta seconds
+                            if (isSoulTrap)
                             {
-                                storedGameObjects[0].Properties.Add(new PropertyDouble("NextAllowedMatingTime", doubleArray[2]));
+                                if (doubleArray.Count > 0 && doubleArray[0] > 0)
+                                {
+                                    var creatureCaughtInSoulBallSecondsAgo =
+                                        0; // GameTime - cryo.GetPropertyValue<double>("LastAutoDurabilityDecreaseTime"); // TODO this is not yet correct
+                                    storedGameObjects[0].Properties.Add(new PropertyDouble("NextAllowedMatingTime",
+                                        doubleArray[0] + GameTime - creatureCaughtInSoulBallSecondsAgo));
+                                }
+                            }
+                            // for vanilla cryoPods the matingCooldown is saved as absolute seconds in game time
+                            else
+                            {
+                                if (doubleArray.Count > 2 && doubleArray[2] > 0)
+                                {
+                                    storedGameObjects[0].Properties
+                                        .Add(new PropertyDouble("NextAllowedMatingTime", doubleArray[2]));
+                                }
                             }
                         }
                     }
+                }
+                catch
+                {
+                    // cryopod couldn't be read
                 }
             }
         }
